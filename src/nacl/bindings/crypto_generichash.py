@@ -42,6 +42,29 @@ _OVERLONG = "{0} length greater than {1} bytes"
 _TOOBIG = "{0} greater than {1}"
 
 
+def _check_digest_size(digest_size: int) -> None:
+    """Validate a blake2b digest size before it reaches libsodium.
+
+    crypto_generichash_blake2b_final() calls sodium_misuse() -- which
+    aborts the whole process -- when the requested output length is
+    outside 1..crypto_generichash_BYTES_MAX, so the bound must be
+    enforced here at the Python level.
+    """
+    ensure(
+        isinstance(digest_size, int),
+        "Digest size must be an integer number",
+        raising=exc.TypeError,
+    )
+
+    ensure(
+        1 <= digest_size <= crypto_generichash_BYTES_MAX,
+        "Digest_size must be between 1 and {0} bytes".format(
+            crypto_generichash_BYTES_MAX
+        ),
+        raising=exc.ValueError,
+    )
+
+
 def _checkparams(
     digest_size: int, key: bytes, salt: bytes, person: bytes
 ) -> None:
@@ -64,17 +87,7 @@ def _checkparams(
         raising=exc.TypeError,
     )
 
-    ensure(
-        isinstance(digest_size, int),
-        "Digest size must be an integer number",
-        raising=exc.TypeError,
-    )
-
-    ensure(
-        digest_size <= crypto_generichash_BYTES_MAX,
-        _TOOBIG.format("Digest_size", crypto_generichash_BYTES_MAX),
-        raising=exc.ValueError,
-    )
+    _check_digest_size(digest_size)
 
     ensure(
         len(key) <= crypto_generichash_KEYBYTES_MAX,
@@ -159,6 +172,7 @@ class Blake2State:
     __slots__ = ["_statebuf", "digest_size"]
 
     def __init__(self, digest_size: int):
+        _check_digest_size(digest_size)
         self._statebuf = ffi.new(
             "unsigned char[]", crypto_generichash_STATEBYTES
         )
@@ -270,6 +284,8 @@ def generichash_blake2b_final(state: Blake2State) -> bytes:
         "State must be a Blake2State object",
         raising=exc.TypeError,
     )
+
+    _check_digest_size(state.digest_size)
 
     _digest = ffi.new("unsigned char[]", crypto_generichash_BYTES_MAX)
     rc = lib.crypto_generichash_blake2b_final(
