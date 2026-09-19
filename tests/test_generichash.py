@@ -22,6 +22,7 @@ from typing import AnyStr
 
 import pytest
 
+import nacl.bindings
 import nacl.encoding
 import nacl.exceptions as exc
 import nacl.hash
@@ -245,3 +246,34 @@ def test_blake2_digest_size_descriptor_coherence():
     assert h.name == "blake2b"
     assert h.block_size == 128
     assert h.digest_size == 64
+
+def test_blake2b_rejects_out_of_range_digest_size():
+    """Regression test for https://github.com/pyca/pynacl/issues/964
+
+    A directly constructed Blake2State, or a mutated digest_size,
+    used to reach crypto_generichash_blake2b_final() unvalidated;
+    libsodium then calls sodium_misuse() and aborts the whole
+    process for output lengths outside 1..crypto_generichash_BYTES_MAX.
+    The bound is now enforced at the Python level.
+    """
+    cg = nacl.bindings.crypto_generichash
+
+    with pytest.raises(exc.ValueError):
+        cg.Blake2State(0)
+    with pytest.raises(exc.ValueError):
+        cg.Blake2State(65)
+    with pytest.raises(exc.TypeError):
+        cg.Blake2State("64")  # type: ignore[arg-type]
+
+    state = cg.generichash_blake2b_init()
+    state.digest_size = 65
+    with pytest.raises(exc.ValueError):
+        cg.generichash_blake2b_final(state)
+    state.digest_size = 0
+    with pytest.raises(exc.ValueError):
+        cg.generichash_blake2b_final(state)
+
+    with pytest.raises(exc.ValueError):
+        cg.generichash_blake2b_init(digest_size=0)
+    with pytest.raises(exc.ValueError):
+        cg.generichash_blake2b_salt_personal(b"data", digest_size=0)
